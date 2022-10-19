@@ -14,7 +14,8 @@ var (
 )
 
 const (
-	hidEndpoint = 4
+	hidEndpointIn  = usb.HID_ENDPOINT_IN
+	hidEndpointOut = usb.HID_ENDPOINT_OUT
 
 	usb_SET_REPORT_TYPE = 33
 	usb_SET_IDLE        = 10
@@ -24,6 +25,10 @@ type hidDevicer interface {
 	Handler() bool
 }
 
+type hidReceiver interface {
+	RxHandler(b []byte)
+}
+
 var devices [5]hidDevicer
 var size int
 
@@ -31,7 +36,11 @@ var size int
 // calls machine.EnableHID for USB configuration
 func SetHandler(d hidDevicer) {
 	if size == 0 {
-		machine.EnableHID(handler, nil, setupHandler)
+		if r, ok := d.(hidReceiver); ok {
+			machine.EnableHID(handler, r.RxHandler, setupHandler)
+		} else {
+			machine.EnableHID(handler, nil, setupHandler)
+		}
 	}
 
 	devices[size] = d
@@ -55,10 +64,14 @@ func setupHandler(setup usb.Setup) bool {
 		machine.SendZlp()
 		ok = true
 	}
+	if setup.BmRequestType == 0xa1 && setup.BRequest == 0x01 {
+		machine.SendZlp()
+		ok = true
+	}
 	return ok
 }
 
 // SendUSBPacket sends a HIDPacket.
 func SendUSBPacket(b []byte) {
-	machine.SendUSBInPacket(hidEndpoint, b)
+	machine.SendUSBInPacket(hidEndpointIn, b)
 }

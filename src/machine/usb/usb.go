@@ -9,6 +9,7 @@ const (
 	DescriptorConfigCDC = 1 << iota
 	DescriptorConfigHID
 	DescriptorConfigMIDI
+	DescriptorConfigJoystick
 )
 
 const (
@@ -35,7 +36,6 @@ const (
 	EndpointOut = 0x00
 	EndpointIn  = 0x80
 
-	NumberOfEndpoints  = 8
 	EndpointPacketSize = 64 // 64 for Full Speed, EPT size max is 1024
 
 	// standard requests
@@ -76,8 +76,10 @@ const (
 	CDC_ENDPOINT_OUT  = 2
 	CDC_ENDPOINT_IN   = 3
 	HID_ENDPOINT_IN   = 4
-	MIDI_ENDPOINT_OUT = 5
-	MIDI_ENDPOINT_IN  = 6
+	HID_ENDPOINT_OUT  = 5
+	MIDI_ENDPOINT_OUT = 6
+	MIDI_ENDPOINT_IN  = 7
+	NumberOfEndpoints = 8
 
 	// bmRequestType
 	REQUEST_HOSTTODEVICE = 0x00
