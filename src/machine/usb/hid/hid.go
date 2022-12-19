@@ -58,17 +58,38 @@ func handler() {
 	}
 }
 
-func setupHandler(setup usb.Setup) bool {
-	ok := false
-	if setup.BmRequestType == usb_SET_REPORT_TYPE && setup.BRequest == usb_SET_IDLE {
-		machine.SendZlp()
-		ok = true
+func setupHandler(setup usb.Setup) (ok bool) {
+	switch setup.BmRequestType {
+	case usb.REQUEST_DEVICETOHOST_CLASS_INTERFACE:
+		switch setup.BRequest {
+		case usb.GET_REPORT:
+			b := []byte{0x06, 0x01, 0x01, 0xe4, 0x06}
+			machine.SendUSBInPacket(0, b)
+			return true
+		case usb.GET_IDLE:
+			// TODO: imprement Send8(idle)
+		case usb.GET_PROTOCOL:
+			// TODO: imprement Send8(protocol)
+			machine.SendZlp()
+			return true
+		}
+	case usb.REQUEST_HOSTTODEVICE_CLASS_INTERFACE:
+		switch setup.BRequest {
+		case usb.SET_IDLE:
+			// TODO: imprement use setup.WValueL
+			machine.SendZlp()
+			return true
+		case usb.SET_REPORT:
+			// TODO: imprement use setup
+			machine.SendZlp()
+			return true
+		case usb.SET_PROTOCOL:
+			// TODO: imprement use setup.WValueL
+			machine.SendZlp()
+			return true
+		}
 	}
-	if setup.BmRequestType == 0xa1 && setup.BRequest == 0x01 {
-		machine.SendZlp()
-		ok = true
-	}
-	return ok
+	return false
 }
 
 // SendUSBPacket sends a HIDPacket.

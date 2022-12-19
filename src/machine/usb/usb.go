@@ -50,8 +50,13 @@ const (
 	GET_INTERFACE     = 10
 	SET_INTERFACE     = 11
 
-	// non standard requests
-	SET_IDLE = 10
+	// hid requests
+	GET_REPORT   = 1
+	GET_IDLE     = 2
+	GET_PROTOCOL = 3
+	SET_REPORT   = 9
+	SET_IDLE     = 10
+	SET_PROTOCOL = 11
 
 	DEVICE_CLASS_COMMUNICATIONS  = 0x02
 	DEVICE_CLASS_HUMAN_INTERFACE = 0x03

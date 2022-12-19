@@ -1,5 +1,7 @@
 package joystick
 
+import "encoding/binary"
+
 const (
 	MAX_EFFECTS        = 14
 	MAX_FFB_AXIS_COUNT = 0x02
@@ -54,29 +56,6 @@ const (
 
 func TO_LT_END_16(x uint16) uint16 { return ((x << 8) & 0xFF00) | ((x >> 8) & 0x00FF) }
 
-type TEffectState struct {
-	State                 uint8
-	EffectType            EffectType
-	Offset                int16
-	Gain                  uint8
-	AttackLevel           int16
-	FadeLevel             int16
-	AttackTime            uint16
-	FadeTime              uint16
-	Magnitude             int16
-	EnableAxis            uint8
-	DirectionX            uint8 // angle (0=0 .. 255=360deg)
-	DirectionY            uint8 // angle (0=0 .. 255=360deg)
-	ConditionBlockCount   uint8
-	Conditions            [MAX_FFB_AXIS_COUNT]TEffectCondition
-	Phase                 uint16 // 0..255 (=0..359, exp-2)
-	StartMagnitude        int16
-	EndMagnitude          int16
-	Period                uint16 // 0..32767 ms
-	Duration, ElapsedTime uint16
-	StartTime             uint64
-}
-
 type PIDStatusInputData struct {
 	ReportId         uint8 //2
 	Status           uint8 // Bits: 0=Device Paused,1=Actuators Enabled,2=Safety Switch,3=Actuator Override Switch,4=Actuator Power
@@ -95,7 +74,23 @@ type SetEffectOutputData struct {
 	EnableAxis            uint8  // bits: 0=X, 1=Y, 2=DirectionEnable
 	DirectionX            uint8  // angle (0=0 .. 255=360deg)
 	DirectionY            uint8  // angle (0=0 .. 255=360deg)
-	//	uint16	startDelay	// 0..32767 ms
+	StartDelay            uint16 // 0..32767 ms
+}
+
+func (s *SetEffectOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[0]
+	s.EffectType = b[0]
+	s.Duration = binary.LittleEndian.Uint16(b[3:5])
+	s.TriggerRepeatInterval = binary.LittleEndian.Uint16(b[5:7])
+	s.SamplePeriod = binary.LittleEndian.Uint16(b[7:9])
+	s.Gain = b[9]
+	s.TriggerButton = b[10]
+	s.EnableAxis = b[11]
+	s.DirectionX = b[12]
+	s.DirectionY = b[13]
+	s.StartDelay = binary.LittleEndian.Uint16(b[14:16])
+	return nil
 }
 
 type SetEnvelopeOutputData struct {
@@ -105,6 +100,16 @@ type SetEnvelopeOutputData struct {
 	FadeLevel        uint16
 	AttackTime       uint32 // ms
 	FadeTime         uint32 // ms
+}
+
+func (s *SetEnvelopeOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	s.AttackLevel = binary.LittleEndian.Uint16(b[2:4])
+	s.FadeLevel = binary.LittleEndian.Uint16(b[4:6])
+	s.AttackTime = binary.LittleEndian.Uint32(b[6:10])
+	s.FadeTime = binary.LittleEndian.Uint32(b[10:14])
+	return nil
 }
 
 type SetConditionOutputData struct {
@@ -119,6 +124,12 @@ type SetConditionOutputData struct {
 	DeadBand             uint16 // 0..255
 }
 
+func (s *SetConditionOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
+}
+
 type SetPeriodicOutputData struct {
 	ReportId         uint8 // =4
 	EffectBlockIndex uint8 // 1..40
@@ -128,16 +139,34 @@ type SetPeriodicOutputData struct {
 	Period           uint32 // 0..32767 ms
 }
 
+func (s *SetPeriodicOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
+}
+
 type SetConstantForceOutputData struct {
 	ReportId         uint8 // =5
 	EffectBlockIndex uint8 // 1..40
 	Magnitude        int16 // -255..255
 }
 
+func (s *SetConstantForceOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
+}
+
 type SetRampForceOutputData struct {
 	ReportId         uint8 // =6
 	EffectBlockIndex uint8 // 1..40
 	StartMagnitude   int16
+}
+
+func (s *SetRampForceOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
 }
 
 type SetCustomForceDataOutputData struct {
@@ -147,10 +176,23 @@ type SetCustomForceDataOutputData struct {
 	Data             [12]int8
 }
 
+func (s *SetCustomForceDataOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
+}
+
 type SetDownloadForceSampleOutputData struct {
 	ReportId uint8 // =8
 	X        int8
 	Y        int8
+}
+
+func (s *SetDownloadForceSampleOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.X = int8(b[1])
+	s.Y = int8(b[2])
+	return nil
 }
 
 type EffectOperationOutputData struct {
@@ -160,9 +202,21 @@ type EffectOperationOutputData struct {
 	LoopCount        uint8
 }
 
+func (s *EffectOperationOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
+}
+
 type BlockFreeOutputData struct {
 	ReportId         uint8 // =11
 	EffectBlockIndex uint8 // 1..40
+}
+
+func (s *BlockFreeOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	return nil
 }
 
 type DeviceControlOutputData struct {
@@ -170,9 +224,21 @@ type DeviceControlOutputData struct {
 	Control  uint8 // 1=Enable Actuators, 2=Disable Actuators, 4=Stop All Effects, 8=Reset, 16=Pause, 32=Continue
 }
 
+func (s *DeviceControlOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.Control = b[1]
+	return nil
+}
+
 type DeviceGainOutputData struct {
 	ReportId uint8 // =13
 	Gain     uint8
+}
+
+func (s *DeviceGainOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.Gain = b[1]
+	return nil
 }
 
 type SetCustomForceOutputData struct {
@@ -180,6 +246,13 @@ type SetCustomForceOutputData struct {
 	EffectBlockIndex uint8 // 1..40
 	SampleCount      uint8
 	SamplePeriod     uint16 // 0..32767 ms
+}
+
+func (s *SetCustomForceOutputData) UnmarshalBinary(b []byte) error {
+	s.ReportId = b[0]
+	s.EffectBlockIndex = b[1]
+	s.SampleCount = b[2]
+	return nil
 }
 
 type CreateNewEffectFeatureData struct {
@@ -209,4 +282,33 @@ type TEffectCondition struct {
 	PositiveSaturation  uint16 // -128..127
 	NegativeSaturation  uint16 // -128..127
 	DeadBand            uint16 // 0..255
+}
+
+type TEffectState struct {
+	State      uint8 // see constants <MEffectState_*>
+	EffectType uint8
+	Offset     int16
+	Gain       uint8
+	// envelope
+	AttackLevel int16
+	FadeLevel   int16
+	FadeTime    uint16
+	AttackTime  uint16
+
+	Magnitude int16
+	// direction
+	EnableAxis uint8 // bits: 0=X, 1=Y, 2=DirectionEnable
+	DirectionX uint8 // angle (0=0 .. 255=360deg)
+	DirectionY uint8 // angle (0=0 .. 255=360deg)
+	// condition
+	ConditionBlocksCount uint8
+	Conditions           [MAX_FFB_AXIS_COUNT]TEffectCondition
+	// periodic
+	Phase          uint16 // 0..255 (=0..359, exp-2)
+	StartMagnitude int16
+	EndMagnitude   int16
+	Period         uint16 // 0..32767 ms
+	Duration       uint16
+	ElapsedTime    uint16
+	StartTime      uint64
 }

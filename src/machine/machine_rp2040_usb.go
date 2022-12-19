@@ -4,6 +4,7 @@ package machine
 
 import (
 	"device/rp"
+	"machine/debug"
 	"machine/usb"
 	"runtime/interrupt"
 	"runtime/volatile"
@@ -16,6 +17,7 @@ var (
 		data   []byte
 		pid    uint32
 	}
+	rx chan []byte
 )
 
 // Configure the USB peripheral. The config is here for compatibility with the UART interface.
@@ -100,27 +102,32 @@ func handleUSBIRQ(intr interrupt.Interrupt) {
 		}
 
 		s2 := rp.USBCTRL_REGS.BUFF_STATUS.Get()
+		rp.USBCTRL_REGS.BUFF_STATUS.Set(s2)
 		// OUT (PC -> rp2040)
-		for i := 0; i < 16; i++ {
+		for i := 0; i < 6; i++ {
 			if s2&(1<<(i*2+1)) > 0 {
-				buf := handleEndpointRx(uint32(i))
+				ep := uint32(i)
+				buf := handleEndpointRx(ep)
 				if usbRxHandler[i] != nil {
 					usbRxHandler[i](buf)
 				}
-				handleEndpointRxComplete(uint32(i))
+				handleEndpointRxComplete(ep)
 			}
 		}
 
 		// IN (rp2040 -> PC)
-		for i := 0; i < 16; i++ {
+		for i := 0; i < 6; i++ {
 			if s2&(1<<(i*2)) > 0 {
 				if usbTxHandler[i] != nil {
 					usbTxHandler[i]()
 				}
 			}
 		}
+<<<<<<< HEAD
 
 		rp.USBCTRL_REGS.BUFF_STATUS.Set(s2)
+=======
+>>>>>>> 25b6d0e3 (work fine!)
 	}
 
 	// Bus is reset
@@ -138,6 +145,7 @@ func initEndpoint(ep, config uint32) {
 	offset := ep*2*USBBufferLen + 0x100
 	val |= offset
 
+	debug.Debug("init:", ep, config)
 	switch config {
 	case usb.ENDPOINT_TYPE_INTERRUPT | usb.EndpointIn:
 		val |= usbEpControlEndpointTypeInterrupt
@@ -177,6 +185,7 @@ func handleUSBSetAddress(setup usb.Setup) bool {
 	for (rp.USBCTRL_REGS.SIE_STATUS.Get() & rp.USBCTRL_REGS_SIE_STATUS_ACK_REC) == 0 {
 		timeout--
 		if timeout == 0 {
+			debug.Debug("set-addr timeout")
 			return true
 		}
 	}
@@ -210,8 +219,17 @@ func sendUSBPacket(ep uint32, data []byte, maxsize uint16) {
 		}
 		epXdata0[ep] = true
 	}
-
-	sendViaEPIn(ep, data, count)
+	switch ep {
+	/*
+		  case usb.CDC_ENDPOINT_OUT, usb.HID_ENDPOINT_OUT, usb.MIDI_ENDPOINT_OUT:
+				if ep == usb.HID_ENDPOINT_OUT {
+					epXdata0[ep] = true
+				}
+				sendViaEPOut(ep, data, count)
+	*/
+	default:
+		sendViaEPIn(ep, data, count)
+	}
 }
 
 func ReceiveUSBControlPacket() ([cdcLineInfoSize]byte, error) {
@@ -255,32 +273,37 @@ func SendZlp() {
 	sendUSBPacket(0, []byte{}, 0)
 }
 
+func SendZlpViaEP(ep uint32) {
+	sendUSBPacket(ep, []byte{}, 0)
+}
+
 func sendViaEPIn(ep uint32, data []byte, count int) {
 	// Prepare buffer control register value
 	val := uint32(count) | usbBuf0CtrlAvail
 
 	// DATA0 or DATA1
-	epXdata0[ep&0x7F] = !epXdata0[ep&0x7F]
-	if !epXdata0[ep&0x7F] {
+	epXdata0[ep&0xF] = !epXdata0[ep&0xF]
+	if !epXdata0[ep&0xF] {
 		val |= usbBuf0CtrlData1Pid
 	}
 
 	// Mark as full
 	val |= usbBuf0CtrlFull
 
-	copy(usbDPSRAM.EPxBuffer[ep&0x7F].Buffer0[:], data[:count])
-	usbDPSRAM.EPxBufferControl[ep&0x7F].In.Set(val)
+	copy(usbDPSRAM.EPxBuffer[ep&0xF].Buffer0[:], data[:count])
+	usbDPSRAM.EPxBufferControl[ep&0xF].In.Set(val)
 }
 
 func sendStallViaEPIn(ep uint32) {
+	//debug.Debug("endpoint stalled:", ep)
 	// Prepare buffer control register value
 	if ep == 0 {
 		rp.USBCTRL_REGS.EP_STALL_ARM.Set(rp.USBCTRL_REGS_EP_STALL_ARM_EP0_IN)
 	}
 	val := uint32(usbBuf0CtrlFull)
-	usbDPSRAM.EPxBufferControl[ep&0x7F].In.Set(val)
+	usbDPSRAM.EPxBufferControl[ep&0xF].In.Set(val)
 	val |= uint32(usbBuf0CtrlStall)
-	usbDPSRAM.EPxBufferControl[ep&0x7F].In.Set(val)
+	usbDPSRAM.EPxBufferControl[ep&0xF].In.Set(val)
 }
 
 type USBDPSRAM struct {

@@ -4,6 +4,7 @@ package machine
 
 import (
 	"errors"
+	"machine/debug"
 	"machine/usb"
 )
 
@@ -154,6 +155,8 @@ func sendDescriptor(setup usb.Setup) {
 			} else {
 				SendZlp()
 			}
+		default:
+			debug.Debug("unknown desc-id:", setup.WValueL)
 		}
 		return
 	case usb.HID_REPORT_TYPE:
@@ -165,6 +168,7 @@ func sendDescriptor(setup usb.Setup) {
 	case usb.DEVICE_QUALIFIER:
 		// skip
 	default:
+		debug.Debug("unknown setup-id:", setup.WValueH)
 	}
 	//debug.Debug("STRING_DESCRIPTOR_TYPE", "unknown:", setup.WValueH)
 
@@ -257,7 +261,7 @@ func handleStandardSetup(setup usb.Setup) bool {
 		return true
 
 	default:
-		//debug.Debug("unknown:", setup.BRequest)
+		debug.Debug("unknown req:", setup.BRequest)
 		return true
 	}
 }
@@ -276,6 +280,7 @@ func EnableCDC(txHandler func(), rxHandler func([]byte), setupHandler func(usb.S
 // EnableHID enables HID. This function must be executed from the init().
 func EnableHID(txHandler func(), rxHandler func([]byte), setupHandler func(usb.Setup) bool) {
 	if rxHandler != nil {
+		debug.Debug("enabled:", "joystick")
 		usbDescriptorConfig |= usb.DescriptorConfigJoystick
 		endPoints[usb.HID_ENDPOINT_OUT] = (usb.ENDPOINT_TYPE_INTERRUPT | usb.EndpointOut)
 		usbRxHandler[usb.HID_ENDPOINT_OUT] = rxHandler

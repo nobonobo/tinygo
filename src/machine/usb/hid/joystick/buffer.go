@@ -4,12 +4,12 @@ import (
 	"runtime/volatile"
 )
 
-const bufferSize = 128
+const bufferSize = 32
 
 // RingBuffer is ring buffer implementation inspired by post at
 // https://www.embeddedrelated.com/showthread/comp.arch.embedded/77084-1.php
 type RingBuffer struct {
-	rxbuffer [bufferSize][4]byte
+	rxbuffer [bufferSize][16]byte
 	head     volatile.Register8
 	tail     volatile.Register8
 }
