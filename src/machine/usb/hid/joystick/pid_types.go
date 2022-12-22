@@ -1,10 +1,20 @@
 package joystick
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"math"
+	"time"
+	"unsafe"
+)
 
 const (
 	MAX_EFFECTS        = 16
 	MAX_FFB_AXIS_COUNT = 0x02
+)
+
+var (
+	SIZE_EFFECT = uint16(unsafe.Sizeof(TEffectState{}))
+	MEMORY_SIZE = SIZE_EFFECT * MAX_EFFECTS
 )
 
 type ReportID uint8
@@ -66,9 +76,15 @@ const (
 	FRICTION_FORCE    = 0xFF
 	INERTIA_DEADBAND  = 0x30
 	FRICTION_DEADBAND = 0x30
+
+	USB_DURATION_INFINITE = 0x7fff
 )
 
 func TO_LT_END_16(x uint16) uint16 { return ((x << 8) & 0xFF00) | ((x >> 8) & 0x00FF) }
+
+func NormalizeRange(x, maxValue int32) float32 {
+	return float32(x) / float32(maxValue)
+}
 
 type PIDStatusInputData struct {
 	ReportID         ReportID //2
@@ -77,24 +93,24 @@ type PIDStatusInputData struct {
 }
 
 type SetEffectOutputData struct {
-	ReportID              ReportID // =1
-	EffectBlockIndex      uint8    // 1..40
-	EffectType            uint8    // 1..12 (effect usages: 26,27,30,31,32,33,34,40,41,42,43,28)
-	Duration              uint16   // 0..32767 ms
-	TriggerRepeatInterval uint16   // 0..32767 ms
-	SamplePeriod          uint16   // 0..32767 ms
-	Gain                  uint8    // 0..255	 (physical 0..10000)
-	TriggerButton         uint8    // button ID (0..8)
-	EnableAxis            uint8    // bits: 0=X, 1=Y, 2=DirectionEnable
-	DirectionX            uint8    // angle (0=0 .. 255=360deg)
-	DirectionY            uint8    // angle (0=0 .. 255=360deg)
-	StartDelay            uint16   // 0..32767 ms
+	ReportID              ReportID   // =1
+	EffectBlockIndex      uint8      // 1..40
+	EffectType            EffectType // 1..12 (effect usages: 26,27,30,31,32,33,34,40,41,42,43,28)
+	Duration              uint16     // 0..32767 ms
+	TriggerRepeatInterval uint16     // 0..32767 ms
+	SamplePeriod          uint16     // 0..32767 ms
+	Gain                  uint8      // 0..255	 (physical 0..10000)
+	TriggerButton         uint8      // button ID (0..8)
+	EnableAxis            uint8      // bits: 0=X, 1=Y, 2=DirectionEnable
+	DirectionX            uint8      // angle (0=0 .. 255=360deg)
+	DirectionY            uint8      // angle (0=0 .. 255=360deg)
+	StartDelay            uint16     // 0..32767 ms
 }
 
 func (s *SetEffectOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
 	s.EffectBlockIndex = b[0]
-	s.EffectType = b[0]
+	s.EffectType = EffectType(b[0])
 	s.Duration = binary.LittleEndian.Uint16(b[3:5])
 	s.TriggerRepeatInterval = binary.LittleEndian.Uint16(b[5:7])
 	s.SamplePeriod = binary.LittleEndian.Uint16(b[7:9])
@@ -111,7 +127,7 @@ type SetEnvelopeOutputData struct {
 	ReportID         ReportID // =2
 	EffectBlockIndex uint8    // 1..40
 	AttackLevel      uint16
-	FadeLevel        uint16
+	FadeLevel        int16
 	AttackTime       uint32 // ms
 	FadeTime         uint32 // ms
 }
@@ -120,7 +136,7 @@ func (s *SetEnvelopeOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
 	s.EffectBlockIndex = b[1]
 	s.AttackLevel = binary.LittleEndian.Uint16(b[2:4])
-	s.FadeLevel = binary.LittleEndian.Uint16(b[4:6])
+	s.FadeLevel = int16(binary.LittleEndian.Uint16(b[4:6]))
 	s.AttackTime = binary.LittleEndian.Uint32(b[6:10])
 	s.FadeTime = binary.LittleEndian.Uint32(b[10:14])
 	return nil
@@ -147,7 +163,7 @@ func (s *SetConditionOutputData) UnmarshalBinary(b []byte) error {
 type SetPeriodicOutputData struct {
 	ReportID         ReportID // =4
 	EffectBlockIndex uint8    // 1..40
-	Magnitude        uint16
+	Magnitude        int16
 	Offset           int16
 	Phase            uint16 // 0..255 (=0..359, exp-2)
 	Period           uint32 // 0..32767 ms
@@ -168,6 +184,7 @@ type SetConstantForceOutputData struct {
 func (s *SetConstantForceOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
 	s.EffectBlockIndex = b[1]
+	s.Magnitude = int16(binary.LittleEndian.Uint16(b[2:4]))
 	return nil
 }
 
@@ -175,11 +192,14 @@ type SetRampForceOutputData struct {
 	ReportID         ReportID // =6
 	EffectBlockIndex uint8    // 1..40
 	StartMagnitude   int16
+	EndMagnitude     int16
 }
 
 func (s *SetRampForceOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
 	s.EffectBlockIndex = b[1]
+	s.StartMagnitude = int16(binary.LittleEndian.Uint16(b[2:4]))
+	s.EndMagnitude = int16(binary.LittleEndian.Uint16(b[4:6]))
 	return nil
 }
 
@@ -187,12 +207,14 @@ type SetCustomForceDataOutputData struct {
 	ReportID         ReportID // =7
 	EffectBlockIndex uint8    // 1..40
 	DataOffset       uint16
-	Data             [12]int8
+	Data             [12]byte // int8
 }
 
 func (s *SetCustomForceDataOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
 	s.EffectBlockIndex = b[1]
+	s.DataOffset = binary.LittleEndian.Uint16(b[2:4])
+	copy(s.Data[:], b[4:])
 	return nil
 }
 
@@ -270,6 +292,7 @@ func (s *SetCustomForceOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
 	s.EffectBlockIndex = b[1]
 	s.SampleCount = b[2]
+	s.SamplePeriod = binary.LittleEndian.Uint16(b[3:5])
 	return nil
 }
 
@@ -279,6 +302,13 @@ type CreateNewEffectFeatureData struct {
 	ByteCount  uint16     // 0..511
 }
 
+func (s *CreateNewEffectFeatureData) UnmarshalBinary(b []byte) error {
+	s.ReportID = ReportID(b[0])
+	s.EffectType = EffectType(b[1])
+	s.ByteCount = binary.LittleEndian.Uint16(b[2:4])
+	return nil
+}
+
 type PIDBlockLoadFeatureData struct {
 	ReportID         ReportID // =6
 	EffectBlockIndex uint8    // 1..40
@@ -286,11 +316,85 @@ type PIDBlockLoadFeatureData struct {
 	RamPoolAvailable uint16   // =0 or 0xFFFF?
 }
 
+func (s PIDBlockLoadFeatureData) MarshalBinary() ([]byte, error) {
+	b := make([]byte, 0, 5)
+	b = append(b, byte(s.ReportID))
+	b = append(b, s.EffectBlockIndex)
+	b = append(b, s.LoadStatus)
+	b = binary.BigEndian.AppendUint16(b, s.RamPoolAvailable)
+	return b, nil
+}
+
 type PIDPoolFeatureData struct {
 	ReportID               ReportID // =7
 	RamPoolSize            uint16   // ?
 	MaxSimultaneousEffects uint8    // ?? 40?
 	MemoryManagement       uint8    // Bits: 0=DeviceManagedPool, 1=SharedParameterBlocks
+}
+
+func (s PIDPoolFeatureData) MarshalBinary() ([]byte, error) {
+	b := make([]byte, 0, 5)
+	b = append(b, byte(s.ReportID))
+	b = binary.BigEndian.AppendUint16(b, s.RamPoolSize)
+	b = append(b, s.MaxSimultaneousEffects)
+	b = append(b, s.MemoryManagement)
+	return b, nil
+}
+
+func ApplyGain(value int16, gain uint8) int32 {
+	return int32(value) * int32(gain) / 255
+}
+
+func ApplyEnvelope(effect *TEffectState, value int32) int32 {
+	magnitude := ApplyGain(effect.Magnitude, effect.Gain)
+	attackLevel := ApplyGain(effect.AttackLevel, effect.Gain)
+	fadeLevel := ApplyGain(effect.FadeLevel, effect.Gain)
+	newValue := magnitude
+	attackTime := int32(effect.AttackTime)
+	fadeTime := int32(effect.FadeTime)
+	elapsedTime := int32(effect.ElapsedTime)
+	duration := int32(effect.Duration)
+
+	if elapsedTime < attackTime {
+		newValue = (magnitude - attackLevel) * elapsedTime
+		newValue /= attackTime
+		newValue += attackLevel
+	}
+	if elapsedTime > duration-fadeTime {
+		newValue = (magnitude - fadeLevel) * (duration - elapsedTime)
+		newValue /= fadeTime
+		newValue += fadeLevel
+	}
+	newValue *= value
+	newValue /= 255
+	return newValue
+}
+
+type EffectParams struct {
+	SpringMaxPosition         int32
+	SpringPosition            int32
+	DamperMaxVelocity         int32
+	DamperVelocity            int32
+	InertiaMaxAcceleration    int32
+	InertiaAcceleration       int32
+	FrictionMaxPositionChange int32
+	FrictionPositionChange    int32
+}
+
+type Gains struct {
+	TotalGain        uint8
+	ConstantGain     uint8
+	RampGain         uint8
+	SquareGain       uint8
+	SineGain         uint8
+	TriangleGain     uint8
+	SawtoothDownGain uint8
+	SawtoothUpGain   uint8
+	SpringGain       uint8
+	DamperGain       uint8
+	InertiaGain      uint8
+	FrictionGain     uint8
+	CustomGain       uint8
 }
 
 type TEffectCondition struct {
@@ -329,4 +433,117 @@ type TEffectState struct {
 	Duration       uint16
 	ElapsedTime    uint16
 	StartTime      uint64
+}
+
+func (ef *TEffectState) Force(gains Gains, params EffectParams, axis uint8) int32 {
+	if axis != 0 {
+		return 0
+	}
+	condition := axis
+	const DegToRad = math.Pi / 180
+	force := float32(0.0)
+	/*
+		direction := float64(ef.DirectionX)
+		condition := axis
+		if ef.EnableAxis == DIRECTION_ENABLE {
+			if ef.ConditionBlocksCount > 1 {
+			} else {
+				condition = 0
+			}
+		}
+		if axis == 1 {
+			direction = float64(ef.DirectionY)
+		}
+		angle := (direction * 360.0 / 255.0) * DegToRad
+		ratio := float32(math.Sin(angle))
+		if axis == 1 {
+			ratio = float32(-1 * math.Cos(angle))
+		}
+	*/
+	switch ef.EffectType {
+	case USB_EFFECT_CONSTANT: // 1
+		force = ef.ConstantForceCalculator() * float32(gains.ConstantGain) / 255.0
+	case USB_EFFECT_RAMP: // 2
+		force = ef.RampForceCalculator() * float32(gains.RampGain) / 255.0
+	case USB_EFFECT_SQUARE: // 3
+		force = ef.SquareForceCalculator() * float32(gains.SquareGain) / 255.0
+	case USB_EFFECT_SINE: // 4
+		force = ef.SineForceCalculator() * float32(gains.SineGain) / 255.0
+	case USB_EFFECT_TRIANGLE: // 5
+		force = ef.TriangleForceCalculator() * float32(gains.TriangleGain) / 255.0
+	case USB_EFFECT_SAWTOOTHDOWN: // 6
+		force = ef.SawtoothDownForceCalculator() * float32(gains.SawtoothDownGain) / 255.0
+	case USB_EFFECT_SAWTOOTHUP: // 7
+		force = ef.SawtoothUpForceCalculator() * float32(gains.SawtoothUpGain) / 255.0
+	case USB_EFFECT_SPRING: // 8
+		metric := NormalizeRange(params.SpringPosition, params.SpringMaxPosition)
+		force = ef.ConditionForceCalculator(metric, ef.Conditions[condition]) * float32(gains.SpringGain) / 255.0
+	case USB_EFFECT_DAMPER: // 9
+		metric := NormalizeRange(params.DamperVelocity, params.DamperMaxVelocity)
+		force = ef.ConditionForceCalculator(metric, ef.Conditions[condition]) * float32(gains.DamperGain) / 255.0
+	case USB_EFFECT_INERTIA: // 10
+		metric := NormalizeRange(params.InertiaAcceleration, params.InertiaMaxAcceleration)
+		force = ef.ConditionForceCalculator(metric, ef.Conditions[condition]) * float32(gains.InertiaGain) / 255.0
+	case USB_EFFECT_FRICTION: // 11
+		metric := NormalizeRange(params.FrictionPositionChange, params.FrictionMaxPositionChange)
+		force = ef.ConditionForceCalculator(metric, ef.Conditions[condition]) * float32(gains.FrictionGain) / 255.0
+	case USB_EFFECT_CUSTOM: // 12
+	}
+	ef.ElapsedTime = uint16(uint64(time.Now().UnixMilli()) - ef.StartTime)
+	return int32(force * float32(gains.TotalGain) / 256)
+}
+
+func (ef *TEffectState) ConstantForceCalculator() float32 {
+	return float32(ef.Magnitude) * float32(ef.Gain) / 255
+}
+
+func (ef *TEffectState) RampForceCalculator() float32 {
+	return float32(ef.StartMagnitude) + float32(ef.ElapsedTime)*(float32(ef.EndMagnitude)-float32(ef.StartMagnitude))/float32(ef.Duration)
+}
+
+func (ef *TEffectState) SquareForceCalculator() float32 {
+	return 0
+}
+
+func (ef *TEffectState) SineForceCalculator() float32 {
+	return 0
+}
+
+func (ef *TEffectState) TriangleForceCalculator() float32 {
+	return 0
+}
+
+func (ef *TEffectState) SawtoothDownForceCalculator() float32 {
+	return 0
+}
+
+func (ef *TEffectState) SawtoothUpForceCalculator() float32 {
+	return 0
+}
+
+func (ef *TEffectState) ConditionForceCalculator(metric float32, cond TEffectCondition) float32 {
+	tempForce := float32(0)
+	minus := float32(cond.CpOffset) - float32(cond.DeadBand)
+	plus := float32(cond.CpOffset) + float32(cond.DeadBand)
+	switch {
+	case metric < minus:
+		tempForce = (metric - minus/10000) * float32(cond.NegativeCoefficient)
+		if tempForce < -float32(cond.NegativeSaturation) {
+			tempForce = -float32(cond.NegativeSaturation)
+		}
+	case metric > plus:
+		tempForce = (metric - plus/10000) * float32(cond.PositiveCoefficient)
+		if tempForce < float32(cond.PositiveSaturation) {
+			tempForce = float32(cond.PositiveSaturation)
+		}
+	default:
+		return 0
+	}
+	tempForce = -tempForce * float32(ef.Gain) / 255
+	switch ef.EffectType {
+	case USB_EFFECT_DAMPER:
+	case USB_EFFECT_INERTIA:
+	case USB_EFFECT_FRICTION:
+	}
+	return tempForce
 }

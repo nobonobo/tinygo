@@ -1,9 +1,12 @@
 package joystick
 
 import (
+	"fmt"
 	"machine"
 	"machine/debug"
 	"machine/usb"
+	"machine/usb/hid"
+	"time"
 )
 
 const (
@@ -11,40 +14,26 @@ const (
 	jsEndpointIn  = usb.HID_ENDPOINT_IN  // to PC
 )
 
-func ApplyGain(value int16, gain uint8) int32 {
-	return int32(value) * int32(gain) / 255
-}
-
-func ApplyEnvelope(effect TEffectState, value int32) int32 {
-	magnitude := ApplyGain(effect.Magnitude, effect.Gain)
-	attackLevel := ApplyGain(effect.AttackLevel, effect.Gain)
-	fadeLevel := ApplyGain(effect.FadeLevel, effect.Gain)
-	newValue := magnitude
-	attackTime := int32(effect.AttackTime)
-	fadeTime := int32(effect.FadeTime)
-	elapsedTime := int32(effect.ElapsedTime)
-	duration := int32(effect.Duration)
-
-	if elapsedTime < attackTime {
-		newValue = (magnitude - attackLevel) * elapsedTime / attackTime
-		newValue = newValue + attackLevel
-	}
-	if elapsedTime > duration-fadeTime {
-		newValue = (magnitude - fadeLevel) * (duration - elapsedTime)
-		newValue = newValue / fadeTime
-		newValue = newValue + fadeLevel
-	}
-	newValue = newValue * value / magnitude
-	return newValue
-}
-
 type PIDHandler struct {
 	buf          *RingBuffer
 	waitTxc      bool
-	effectStates [MAX_EFFECTS]TEffectState
+	effectStates [MAX_EFFECTS]*TEffectState
+	nextEID      uint8
 	enabled      bool
 	paused       bool
 	gain         uint8
+	pidBlockLoad PIDBlockLoadFeatureData
+}
+
+func NewPIDHandler() *PIDHandler {
+	effects := [MAX_EFFECTS]*TEffectState{}
+	for i := range effects[:] {
+		effects[i] = &TEffectState{}
+	}
+	return &PIDHandler{
+		buf:          NewRingBuffer(),
+		effectStates: effects,
+	}
 }
 
 // sendUSBPacket sends a JoystickPacket.
@@ -89,50 +78,181 @@ func (m *PIDHandler) RxHandler(b []byte) {
 	}
 	reportId := ReportID(b[0])
 	switch reportId {
-	case ReportSetEffect:
+	case ReportSetEffect: // 0x01
 		m.SetEffect(b)
-	case ReportSetEnvelope:
+	case ReportSetEnvelope: // 0x02
 		m.SetEnvelope(b)
-	case ReportSetCondition:
+	case ReportSetCondition: // 0x03
 		m.SetCondition(b)
-	case ReportSetPeriodic:
+	case ReportSetPeriodic: // 0x04
 		m.SetPeriodic(b)
-	case ReportSetConstantForce:
+	case ReportSetConstantForce: // 0x05
 		m.SetConstantForce(b)
-	case ReportSetRampForce:
+	case ReportSetRampForce: // 0x06
 		m.SetRampForce(b)
-	case ReportSetCustomForceData:
+	case ReportSetCustomForceData: // 0x07
 		m.SetCustomForceData(b)
-	case ReportSetDownloadForceSample:
+	case ReportSetDownloadForceSample: // 0x08
 		m.SetDownloadForceSample(b)
-	case ReportEffectOperation:
+	case ReportEffectOperation: // 0x0a
 		m.EffectOperation(b)
-	case ReportBlockFree:
+	case ReportBlockFree: // 0x0b
 		m.BlockFree(b)
-	case ReportDeviceControl:
+	case ReportDeviceControl: // 0x0c
 		m.DeviceControl(b)
-	case ReportDeviceGain:
+	case ReportDeviceGain: // 0x0d
 		m.DeviceGain(b)
-	case ReportSetCustomForce:
+	case ReportSetCustomForce: // 0x0e
 		m.SetCustomForce(b)
 	default:
 		debug.Debug("unknown rx", debug.Hex(b))
 		return
 	}
-	debug.Debug("rx", debug.Hex(b))
+	// debug.Debug("rx", debug.Hex(b))
+}
+
+func (m *PIDHandler) CreateNewEffect(data *CreateNewEffectFeatureData) error {
+	m.pidBlockLoad.ReportID = 6
+	m.pidBlockLoad.EffectBlockIndex = m.GetNextFreeEffect()
+	if m.pidBlockLoad.EffectBlockIndex == 0 {
+		m.pidBlockLoad.LoadStatus = 2 // 1=Success,2=Full,3=Error
+		return fmt.Errorf("effect not allocated")
+	}
+	m.pidBlockLoad.LoadStatus = 1 // 1=Success,2=Full,3=Error
+	effect := TEffectState{}
+	effect.State = MEFFECTSTATE_ALLOCATED
+	m.pidBlockLoad.RamPoolAvailable -= SIZE_EFFECT
+	*m.effectStates[m.pidBlockLoad.EffectBlockIndex] = effect
+	return nil
+}
+
+func (m *PIDHandler) GetReport(setup usb.Setup) bool {
+	reportId := setup.WValueL
+	switch setup.WValueH {
+	case hid.REPORT_TYPE_INPUT:
+	case hid.REPORT_TYPE_OUTPUT:
+	case hid.REPORT_TYPE_FEATURE:
+		switch reportId {
+		case 6:
+			b, _ := m.pidBlockLoad.MarshalBinary()
+			debug.Debug("GetReport 6 response", debug.Hex(b))
+			machine.SendUSBInPacket(0, b)
+			return true
+		case 7:
+			b, _ := PIDPoolFeatureData{
+				ReportID:               7,
+				RamPoolSize:            MEMORY_SIZE,
+				MaxSimultaneousEffects: MAX_EFFECTS,
+				MemoryManagement:       3,
+			}.MarshalBinary()
+			debug.Debug("GetReport 7 response", debug.Hex(b))
+			machine.SendUSBInPacket(0, b)
+			return true
+		}
+	}
+	debug.Debug("GetReport unknown setup:", setup)
+	return false
+}
+
+func (m *PIDHandler) GetIdle(setup usb.Setup) bool {
+	machine.SendUSBInPacket(0, []byte{0})
+	return true
+}
+
+func (m *PIDHandler) GetProtocol(setup usb.Setup) bool {
+	machine.SendUSBInPacket(0, []byte{0})
+	return true
+}
+
+func (m *PIDHandler) SetReport(setup usb.Setup) bool {
+	reportId := setup.WValueL
+	switch setup.WValueH {
+	case hid.REPORT_TYPE_INPUT:
+		machine.SendZlp()
+		return true
+	case hid.REPORT_TYPE_OUTPUT:
+		machine.SendZlp()
+		return true
+	case hid.REPORT_TYPE_FEATURE:
+		if setup.WLength == 0 {
+			machine.ReceiveUSBControlPacket()
+			machine.SendZlp()
+			return true
+		}
+		if reportId == 5 {
+			b, err := machine.ReceiveUSBControlPacket()
+			v := &CreateNewEffectFeatureData{}
+			v.UnmarshalBinary(b[:])
+			if err := m.CreateNewEffect(v); err != nil {
+				debug.Debug("SetReport", err)
+			}
+			debug.Debug("SetReport", debug.Hex(b[:]), err)
+			machine.SendZlp()
+			return true
+		}
+	}
+	debug.Debug("SetReport unknown setup:", setup)
+	return false
+}
+
+func (m *PIDHandler) SetIdle(setup usb.Setup) bool {
+	machine.SendZlp()
+	return true
+}
+
+func (m *PIDHandler) SetProtocol(setup usb.Setup) bool {
+	machine.SendZlp()
+	return true
+}
+
+func (m *PIDHandler) SetupHandler(setup usb.Setup) (ok bool) {
+	switch setup.BmRequestType {
+	case usb.REQUEST_DEVICETOHOST_CLASS_INTERFACE:
+		switch setup.BRequest {
+		case usb.GET_REPORT:
+			return m.GetReport(setup)
+		case usb.GET_IDLE:
+			return m.GetIdle(setup)
+		case usb.GET_PROTOCOL:
+			return m.GetProtocol(setup)
+		default:
+			debug.Debug("setup: D2H unknown request")
+		}
+	case usb.REQUEST_HOSTTODEVICE_CLASS_INTERFACE:
+		switch setup.BRequest {
+		case usb.SET_REPORT:
+			return m.SetReport(setup)
+		case usb.SET_IDLE:
+			return m.SetIdle(setup)
+		case usb.SET_PROTOCOL:
+			return m.SetProtocol(setup)
+		default:
+			debug.Debug("setup: H2D unknown request")
+		}
+	}
+	return false
 }
 
 func (m *PIDHandler) GetNextFreeEffect() uint8 {
-	for i, v := range m.effectStates {
-		if v.State == MEFFECTSTATE_FREE {
-			v.State = MEFFECTSTATE_ALLOCATED
-			return uint8(i)
-		}
+	if m.nextEID == MAX_EFFECTS {
+		return 0
 	}
-	return 0
+	id := m.nextEID
+	m.nextEID++
+
+	for m.effectStates[m.nextEID].State != MEFFECTSTATE_FREE {
+		if m.nextEID >= MAX_EFFECTS {
+			break
+		}
+		m.nextEID++
+	}
+	effect := m.effectStates[id]
+	effect.State = MEFFECTSTATE_ALLOCATED
+	return id
 }
 
 func (m *PIDHandler) StopAllEffects() {
+	//debug.Debug("StopAllEffects")
 	for id := uint8(0); id < MAX_EFFECTS; id++ {
 		m.StopEffect(id)
 	}
@@ -143,11 +263,11 @@ func (m *PIDHandler) StartEffect(id uint8) {
 		debug.Debug("StartEffect", "effect index out of range", id)
 		return
 	}
-	effect := TEffectState{}
+	//debug.Debug("StartEffect", id)
+	effect := m.effectStates[id]
 	effect.State = MEFFECTSTATE_PLAYING
 	effect.ElapsedTime = 0
-	effect.StartTime = 0
-	m.effectStates[id] = effect
+	effect.StartTime = uint64(time.Now().UnixMilli())
 }
 
 func (m *PIDHandler) StopEffect(id uint8) {
@@ -155,15 +275,19 @@ func (m *PIDHandler) StopEffect(id uint8) {
 		debug.Debug("StopEffect", "effect index out of range", id)
 		return
 	}
+	//debug.Debug("StopEffect", id)
 	effect := m.effectStates[id]
 	effect.State &= ^MEFFECTSTATE_PLAYING
-	m.effectStates[id] = effect
+	m.pidBlockLoad.RamPoolAvailable += SIZE_EFFECT
 }
 
 func (m *PIDHandler) FreeAllEffects() {
+	//debug.Debug("FreeAllEffects")
+	m.nextEID = 1
 	for id := uint8(0); id < MAX_EFFECTS; id++ {
-		m.FreeEffect(id)
+		*m.effectStates[id] = TEffectState{}
 	}
+	m.pidBlockLoad.RamPoolAvailable = MEMORY_SIZE
 }
 
 func (m *PIDHandler) FreeEffect(id uint8) {
@@ -171,55 +295,94 @@ func (m *PIDHandler) FreeEffect(id uint8) {
 		debug.Debug("FreeEffect", "effect index out of range", id)
 		return
 	}
+	//debug.Debug("FreeEffect", id)
 	state := m.effectStates[id]
 	state.State = MEFFECTSTATE_FREE
-	m.effectStates[id] = state
+	if id < m.nextEID {
+		m.nextEID = id
+	}
 }
 
 // SetEffect reportId == 0x01
 func (m *PIDHandler) SetEffect(b []byte) {
+	//debug.Debug("SetEffect", debug.Hex(b))
 	var v SetEffectOutputData
 	_ = v.UnmarshalBinary(b)
-	// TODO: implement
+	effect := m.effectStates[v.EffectBlockIndex]
+	effect.Duration = v.Duration
+	effect.DirectionX = v.DirectionX
+	effect.DirectionY = v.DirectionY
+	effect.EffectType = v.EffectType
+	effect.Gain = v.Gain
+	effect.EnableAxis = v.EnableAxis
 }
 
 // SetEnvelope reportId == 0x02
 func (m *PIDHandler) SetEnvelope(b []byte) {
+	debug.Debug("SetEnvelope", debug.Hex(b))
 	var v SetEnvelopeOutputData
 	_ = v.UnmarshalBinary(b)
-	// TODO: implement
+	effect := m.effectStates[v.EffectBlockIndex]
+	effect.AttackLevel = int16(v.AttackLevel)
+	effect.FadeLevel = v.FadeLevel
+	effect.AttackTime = uint16(v.AttackTime)
+	effect.FadeTime = uint16(v.FadeTime)
 }
 
 // SetCondition reportId == 0x03
 func (m *PIDHandler) SetCondition(b []byte) {
+	//debug.Debug("SetCondition", debug.Hex(b))
 	var v SetConditionOutputData
 	_ = v.UnmarshalBinary(b)
-	// TODO: implement
+	axis := v.ParameterBlockOffset
+	effect := m.effectStates[v.EffectBlockIndex]
+	condition := effect.Conditions[axis]
+	condition.CpOffset = v.CpOffset
+	condition.PositiveCoefficient = v.PositiveCoefficient
+	condition.NegativeCoefficient = v.NegativeCoefficient
+	condition.PositiveSaturation = v.PositiveSaturation
+	condition.NegativeSaturation = v.NegativeSaturation
+	condition.DeadBand = v.DeadBand
+	effect.Conditions[axis] = condition
+	if effect.ConditionBlocksCount < axis {
+		effect.ConditionBlocksCount++
+	}
 }
 
 // SetPeriodic reportId == 0x04
 func (m *PIDHandler) SetPeriodic(b []byte) {
+	//debug.Debug("SetPeriodic", debug.Hex(b))
 	var v SetPeriodicOutputData
 	_ = v.UnmarshalBinary(b)
-	// TODO: implement
+	effect := m.effectStates[v.EffectBlockIndex]
+	effect.Magnitude = v.Magnitude
+	effect.Offset = v.Offset
+	effect.Phase = v.Phase
+	effect.Period = uint16(v.Period)
 }
 
 // SetConstantForce reportId == 0x05
 func (m *PIDHandler) SetConstantForce(b []byte) {
+	//debug.Debug("SetConstantForce", debug.Hex(b))
 	var v SetConstantForceOutputData
 	_ = v.UnmarshalBinary(b)
-	// TODO: implement
+	effect := m.effectStates[v.EffectBlockIndex]
+	effect.Magnitude = v.Magnitude
 }
 
 // SetRampForce reportId == 0x06
 func (m *PIDHandler) SetRampForce(b []byte) {
+	debug.Debug("SetRampForce", debug.Hex(b))
 	var v SetRampForceOutputData
 	_ = v.UnmarshalBinary(b)
-	// TODO: implement
+	effect := m.effectStates[v.EffectBlockIndex]
+	effect.StartMagnitude = v.StartMagnitude
+	effect.EndMagnitude = v.EndMagnitude
 }
 
 // SetCustomForceData reportId == 0x07
 func (m *PIDHandler) SetCustomForceData(b []byte) {
+	debug.Debug("SetCustomForceData", debug.Hex(b))
 	var v SetCustomForceDataOutputData
 	_ = v.UnmarshalBinary(b)
 	// TODO: implement
@@ -227,6 +390,7 @@ func (m *PIDHandler) SetCustomForceData(b []byte) {
 
 // SetDownloadForceSample reportId == 0x08
 func (m *PIDHandler) SetDownloadForceSample(b []byte) {
+	debug.Debug("SetDownloadForceSample", debug.Hex(b))
 	var v SetDownloadForceSampleOutputData
 	_ = v.UnmarshalBinary(b)
 	// TODO: implement
@@ -238,6 +402,14 @@ func (m *PIDHandler) EffectOperation(b []byte) {
 	_ = v.UnmarshalBinary(b)
 	switch v.Operation {
 	case EOStart:
+		effect := m.effectStates[v.EffectBlockIndex]
+		switch v.LoopCount {
+		case 0xff:
+			effect.Duration = USB_DURATION_INFINITE
+		default:
+			effect.Duration *= uint16(v.LoopCount)
+		}
+		m.effectStates[v.EffectBlockIndex] = effect
 		m.StartEffect(v.EffectBlockIndex)
 	case EOStartSolo:
 		m.StopAllEffects()

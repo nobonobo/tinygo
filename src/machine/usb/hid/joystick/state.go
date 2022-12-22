@@ -2,10 +2,6 @@ package joystick
 
 import "encoding/binary"
 
-const (
-	FORCE_FEEDBACK_MAXGAIN = 100
-)
-
 type HatDirection uint8
 
 const (
@@ -19,22 +15,6 @@ const (
 	HatLeftUp
 	HatCenter
 )
-
-type Gains struct {
-	TotalGain        uint8
-	ConstantGain     uint8
-	RampGain         uint8
-	SquareGain       uint8
-	SineGain         uint8
-	TriangleGain     uint8
-	SawtoothdownGain uint8
-	SawtoothupGain   uint8
-	SpringGain       uint8
-	DamperGain       uint8
-	InertiaGain      uint8
-	FrictionGain     uint8
-	CustomGain       uint8
-}
 
 type Constraint struct {
 	MinIn  int
@@ -50,6 +30,10 @@ type AxisValue struct {
 
 func fit(x, in_min, in_max int, out_min, out_max int16) int16 {
 	return int16((x-in_min)*(int(out_max)-int(out_min))/(in_max-in_min) + int(out_min))
+}
+
+func fitf(x, in_min, in_max, out_min, out_max float32) float32 {
+	return x - in_min*(out_max-out_min)/(in_max-in_min) + out_min
 }
 
 func limit(v, max int) int {
