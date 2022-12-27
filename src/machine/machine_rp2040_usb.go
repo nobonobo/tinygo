@@ -4,7 +4,6 @@ package machine
 
 import (
 	"device/rp"
-	"machine/debug"
 	"machine/usb"
 	"runtime/interrupt"
 	"runtime/volatile"
@@ -141,7 +140,6 @@ func initEndpoint(ep, config uint32) {
 	offset := ep*2*USBBufferLen + 0x100
 	val |= offset
 
-	debug.Debug("init:", ep, config)
 	switch config {
 	case usb.ENDPOINT_TYPE_INTERRUPT | usb.EndpointIn:
 		val |= usbEpControlEndpointTypeInterrupt
@@ -181,8 +179,7 @@ func handleUSBSetAddress(setup usb.Setup) bool {
 	for (rp.USBCTRL_REGS.SIE_STATUS.Get() & rp.USBCTRL_REGS_SIE_STATUS_ACK_REC) == 0 {
 		timeout--
 		if timeout == 0 {
-			debug.Debug("set-addr timeout")
-			return true
+			return false
 		}
 	}
 
@@ -291,7 +288,6 @@ func sendViaEPIn(ep uint32, data []byte, count int) {
 }
 
 func sendStallViaEPIn(ep uint32) {
-	//debug.Debug("endpoint stalled:", ep)
 	// Prepare buffer control register value
 	if ep == 0 {
 		rp.USBCTRL_REGS.EP_STALL_ARM.Set(rp.USBCTRL_REGS_EP_STALL_ARM_EP0_IN)

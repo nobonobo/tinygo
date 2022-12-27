@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	MAX_EFFECTS        = 16
-	MAX_FFB_AXIS_COUNT = 0x02
+	MAX_EFFECTS        = 10
+	MAX_FFB_AXIS_COUNT = 2
 )
 
 var (
@@ -149,8 +149,8 @@ type SetConditionOutputData struct {
 	CpOffset             int16    // 0..255
 	PositiveCoefficient  int16    // -128..127
 	NegativeCoefficient  int16    // -128..127
-	PositiveSaturation   uint16   // -	128..127
-	NegativeSaturation   uint16   // -128..127
+	PositiveSaturation   int16    // -128..127
+	NegativeSaturation   int16    // -128..127
 	DeadBand             uint16   // 0..255
 }
 
@@ -321,7 +321,7 @@ func (s PIDBlockLoadFeatureData) MarshalBinary() ([]byte, error) {
 	b = append(b, byte(s.ReportID))
 	b = append(b, s.EffectBlockIndex)
 	b = append(b, s.LoadStatus)
-	b = binary.BigEndian.AppendUint16(b, s.RamPoolAvailable)
+	b = binary.LittleEndian.AppendUint16(b, s.RamPoolAvailable)
 	return b, nil
 }
 
@@ -335,7 +335,7 @@ type PIDPoolFeatureData struct {
 func (s PIDPoolFeatureData) MarshalBinary() ([]byte, error) {
 	b := make([]byte, 0, 5)
 	b = append(b, byte(s.ReportID))
-	b = binary.BigEndian.AppendUint16(b, s.RamPoolSize)
+	b = binary.LittleEndian.AppendUint16(b, s.RamPoolSize)
 	b = append(b, s.MaxSimultaneousEffects)
 	b = append(b, s.MemoryManagement)
 	return b, nil
@@ -401,8 +401,8 @@ type TEffectCondition struct {
 	CpOffset            int16  // -128..127
 	PositiveCoefficient int16  // -128..127
 	NegativeCoefficient int16  // -128..127
-	PositiveSaturation  uint16 // -128..127
-	NegativeSaturation  uint16 // -128..127
+	PositiveSaturation  int16  // -128..127
+	NegativeSaturation  int16  // -128..127
 	DeadBand            uint16 // 0..255
 }
 

@@ -4,7 +4,6 @@ package machine
 
 import (
 	"errors"
-	"machine/debug"
 	"machine/usb"
 )
 
@@ -101,7 +100,6 @@ var (
 func sendDescriptor(setup usb.Setup) {
 	switch setup.WValueH {
 	case usb.CONFIGURATION_DESCRIPTOR_TYPE:
-		//debug.DebugHex("CONFIGURATION_DESCRIPTOR_TYPE", usbDescriptor.Configuration)
 		sendUSBPacket(0, usbDescriptor.Configuration, setup.WLength)
 		return
 	case usb.DEVICE_DESCRIPTOR_TYPE:
@@ -118,7 +116,6 @@ func sendDescriptor(setup usb.Setup) {
 		}
 
 		usbDescriptor.Configure(usb_VID, usb_PID)
-		//debug.DebugHex("DEVICE_DESCRIPTOR_TYPE", usbDescriptor.Device)
 		sendUSBPacket(0, usbDescriptor.Device, setup.WLength)
 		return
 
@@ -129,19 +126,16 @@ func sendDescriptor(setup usb.Setup) {
 			usb_trans_buffer[1] = 0x03
 			usb_trans_buffer[2] = 0x09
 			usb_trans_buffer[3] = 0x04
-			//debug.DebugHex("STRING_DESCRIPTOR_TYPE:0", usb_trans_buffer[:4])
 			sendUSBPacket(0, usb_trans_buffer[:4], setup.WLength)
 
 		case usb.IPRODUCT:
 			b := usb_trans_buffer[:(len(usb_STRING_PRODUCT)<<1)+2]
 			strToUTF16LEDescriptor(usb_STRING_PRODUCT, b)
-			//debug.DebugHex("STRING_DESCRIPTOR_TYPE:IPRODUCT", b)
 			sendUSBPacket(0, b, setup.WLength)
 
 		case usb.IMANUFACTURER:
 			b := usb_trans_buffer[:(len(usb_STRING_MANUFACTURER)<<1)+2]
 			strToUTF16LEDescriptor(usb_STRING_MANUFACTURER, b)
-			//debug.DebugHex("STRING_DESCRIPTOR_TYPE:IMANUFACTURER", b)
 			sendUSBPacket(0, b, setup.WLength)
 
 		case usb.ISERIAL:
@@ -150,27 +144,20 @@ func sendDescriptor(setup usb.Setup) {
 				s := "HIDFD"
 				b := usb_trans_buffer[:(len(s)<<1)+2]
 				strToUTF16LEDescriptor(s, b)
-				//debug.DebugHex("STRING_DESCRIPTOR_TYPE:ISERIAL", b)
 				sendUSBPacket(0, b, setup.WLength)
 			} else {
 				SendZlp()
 			}
-		default:
-			debug.Debug("unknown desc-id:", setup.WValueL)
 		}
 		return
 	case usb.HID_REPORT_TYPE:
 		if h, ok := usbDescriptor.HID[setup.WIndex]; ok {
-			//debug.DebugHex("STRING_DESCRIPTOR_TYPE:HID_REPORT_TYPE", h)
 			sendUSBPacket(0, h, setup.WLength)
 			return
 		}
 	case usb.DEVICE_QUALIFIER:
 		// skip
-	default:
-		debug.Debug("unknown setup-id:", setup.WValueH)
 	}
-	//debug.Debug("STRING_DESCRIPTOR_TYPE", "unknown:", setup.WValueH)
 
 	// do not know how to handle this message, so return zero
 	SendZlp()
@@ -189,12 +176,10 @@ func handleStandardSetup(setup usb.Setup) bool {
 			}
 		}
 
-		//debug.DebugHex("GET_STATUS", usb_trans_buffer[:2])
 		sendUSBPacket(0, usb_trans_buffer[:2], setup.WLength)
 		return true
 
 	case usb.CLEAR_FEATURE:
-		//debug.Debug("CLEAR_FEATURE", setup)
 		if setup.WValueL == 1 { // DEVICEREMOTEWAKEUP
 			isRemoteWakeUpEnabled = false
 		} else if setup.WValueL == 0 { // ENDPOINTHALT
@@ -204,7 +189,6 @@ func handleStandardSetup(setup usb.Setup) bool {
 		return true
 
 	case usb.SET_FEATURE:
-		//debug.Debug("SET_FEATURE", setup)
 		if setup.WValueL == 1 { // DEVICEREMOTEWAKEUP
 			isRemoteWakeUpEnabled = true
 		} else if setup.WValueL == 0 { // ENDPOINTHALT
@@ -214,26 +198,21 @@ func handleStandardSetup(setup usb.Setup) bool {
 		return true
 
 	case usb.SET_ADDRESS:
-		//debug.Debug("SET_ADDRESS", setup)
 		return handleUSBSetAddress(setup)
 
 	case usb.GET_DESCRIPTOR:
-		//debug.Debug("GET_DESCRIPTOR", setup)
 		sendDescriptor(setup)
 		return true
 
 	case usb.SET_DESCRIPTOR:
-		//debug.Debug("SET_DESCRIPTOR", setup)
 		return false
 
 	case usb.GET_CONFIGURATION:
 		usb_trans_buffer[0] = usbConfiguration
-		//debug.DebugHex("GET_CONFIGURATION", usb_trans_buffer[:1])
 		sendUSBPacket(0, usb_trans_buffer[:1], setup.WLength)
 		return true
 
 	case usb.SET_CONFIGURATION:
-		//debug.Debug("SET_CONFIGURATION", setup)
 		if setup.BmRequestType&usb.REQUEST_RECIPIENT == usb.REQUEST_DEVICE {
 			for i := 1; i < len(endPoints); i++ {
 				initEndpoint(uint32(i), endPoints[i])
@@ -249,21 +228,17 @@ func handleStandardSetup(setup usb.Setup) bool {
 
 	case usb.GET_INTERFACE:
 		usb_trans_buffer[0] = usbSetInterface
-		//debug.DebugHex("GET_INTERFACE", usb_trans_buffer[:1])
 		sendUSBPacket(0, usb_trans_buffer[:1], setup.WLength)
 		return true
 
 	case usb.SET_INTERFACE:
-		//debug.Debug("SET_INTERFACE", setup)
 		usbSetInterface = setup.WValueL
 
 		SendZlp()
 		return true
 
-	default:
-		debug.Debug("unknown req:", setup.BRequest)
-		return true
 	}
+	return false
 }
 
 func EnableCDC(txHandler func(), rxHandler func([]byte), setupHandler func(usb.Setup) bool) {
@@ -280,7 +255,6 @@ func EnableCDC(txHandler func(), rxHandler func([]byte), setupHandler func(usb.S
 // EnableHID enables HID. This function must be executed from the init().
 func EnableHID(txHandler func(), rxHandler func([]byte), setupHandler func(usb.Setup) bool) {
 	if rxHandler != nil {
-		debug.Debug("enabled:", "joystick")
 		usbDescriptorConfig |= usb.DescriptorConfigJoystick
 		endPoints[usb.HID_ENDPOINT_OUT] = (usb.ENDPOINT_TYPE_INTERRUPT | usb.EndpointOut)
 		usbRxHandler[usb.HID_ENDPOINT_OUT] = rxHandler
