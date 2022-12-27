@@ -156,7 +156,7 @@ var DescriptorCDCJoystick = Descriptor{
 		0x00,       // bCountryCode: Not Supported
 		0x01,       // bNumDescriptors: 1
 		0x22,       // Type: HID Report
-		0x1c, 0x05, // Length: 0x051c(1308)
+		0x0b, 0x05, // Length: 0x050b(1291)
 		// ENDPOINT Descriptor
 		0x07, 0x05, 0x84, 0x03, 0x40, 0x00, 0x01,
 		// ENDPOINT Descriptor
@@ -165,7 +165,7 @@ var DescriptorCDCJoystick = Descriptor{
 	HID: map[uint16][]byte{
 		2: []byte{
 			0x05, 0x01, // USAGE_PAGE (Generic Desktop)
-			0x09, 0x08, // USAGE (0x04:Joystick/0x05:Gamepad/0x08:Multi-axis)
+			0x09, 0x04, // USAGE (0x04:Joystick/0x05:Gamepad/0x08:Multi-axis)
 			0xA1, 0x01, // COLLECTION (Application)
 			//================================Input Report======================================//
 			0x09, 0x01, // USAGE (Pointer)
@@ -190,22 +190,14 @@ var DescriptorCDCJoystick = Descriptor{
 			0x16, 0x01, 0x80, //LOGICAL_MINIMUM (-32767)
 			0x26, 0xFF, 0x7F, //LOGICAL_MAXIMUM (32767)
 			0x75, 0x10, // REPORT_SIZE (16)
-			0x95, 0x05, // REPORT_COUNT (5)
+			0x95, 0x06, // REPORT_COUNT (6)
 			0xa1, 0x00, // COLLECTION (Physical)
 			0x09, 0x30, // USAGE (X)
 			0x09, 0x31, // USAGE (Y)
 			0x09, 0x32, // USAGE (Z)
+			0x09, 0x33, // USAGE (Ry)
 			0x09, 0x34, // USAGE (Ry)
 			0x09, 0x35, // USAGE (Rz)
-			0x81, 0x02, // INPUT (Data/Var/Abs)
-			0xc0,       // END_COLLECTION
-			0x05, 0x02, // USAGE_PAGE (Simulation Controls)
-			0x16, 0x01, 0x80, //LOGICAL_MINIMUM (-32767)
-			0x26, 0xFF, 0x7F, //LOGICAL_MAXIMUM (32767)
-			0x75, 0x10, // REPORT_SIZE (16)
-			0x95, 0x01, // REPORT_COUNT (1)
-			0xa1, 0x00, // COLLECTION (Physical)
-			0x09, 0xc8, // USAGE (Steering)
 			0x81, 0x02, // INPUT (Data/Var/Abs)
 			0xc0, // END_COLLECTION
 			0xc0, // END_COLLECTION
